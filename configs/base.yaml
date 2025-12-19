@@ -1,0 +1,34 @@
+# Base configuration file
+
+web_fetcher_tool_config:
+  type: web_fetcher_tool
+
+web_searcher_tool_config:
+  type: web_searcher_tool
+  engine: Firecrawl  # Options: "Firecrawl", "Google", "Bing", "DuckDuckGo", "Baidu"
+  retry_delay: 10
+  max_retries: 3
+  lang: en
+  country: us
+  num_results: 5
+  fetch_content: true
+  max_length: 4096
+
+auto_browser_use_tool_config:
+  type: auto_browser_use_tool
+  model_id: qwen3-8b
+
+mcp_tools_config:
+  mcpServers:
+    LocalMCP:
+      command: python
+      args:
+        - src/mcp/server.py
+      env:
+        DEBUG: "true"
+    # Remote server example:
+    # calendar:
+    #   url: https://calendar-api.example.com/mcp
+    #   transport: streamable-http
+
+

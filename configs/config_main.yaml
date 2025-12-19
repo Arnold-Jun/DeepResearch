@@ -1,0 +1,67 @@
+# Main configuration file
+# Inherits from base.yaml
+
+_base_: ./base.yaml
+
+# General Config
+tag: main
+concurrency: 1
+workdir: workdir
+log_path: log.txt
+save_path: dra.jsonl
+
+use_hierarchical_agent: false
+
+# Orchestrator 配置
+orchestrator_config:
+  max_rounds: 12                    # 最大轮次数
+  deadline_seconds: 600             # 全局超时时间（秒）
+  max_parallelism: 5                 # 最大并行任务数
+  max_failures_per_parent: 6         # 每个父任务的最大失败次数
+  subtask_timeout_seconds: 240      # 子任务超时时间（秒）
+  subtask_output_max_chars: 1800    # 子任务输出最大字符数
+  subtask_failure_threshold: 0.5    # 子任务失败率阈值（0.0-1.0），超过此阈值则算作父任务失败
+  planning_model_id: qwen3-8b       # Planner 使用的模型
+  scheduler_model_id: qwen3-8b      # Scheduler 使用的模型
+  summarizer_model_id: qwen3-8b     # Summarizer 使用的模型（默认与 Planner 相同）
+
+deep_researcher_agent_config:
+  type: deep_researcher_agent
+  name: deep_researcher_agent
+  model_id: qwen3-8b
+  description: "A deep researcher agent that can conduct extensive web searches."
+  max_steps: 3
+  provide_run_summary: true
+  trace_max_len: 8  # 工具调用历史条数（默认 8）
+  trace_observation_max_chars: 1000  # 每条工具调用结果的最大字符数（默认 1000）
+  tools:
+    - python_interpreter_tool
+
+deep_analyzer_agent_config:
+  type: deep_analyzer_agent
+  name: deep_analyzer_agent
+  model_id: qwen3-8b
+  description: "A deep analyzer agent that can perform systematic, step-by-step analysis."
+  max_steps: 3
+  provide_run_summary: true
+  analyzer_model_ids:
+    - qwen3-8b
+  summarizer_model_id: qwen3-8b
+  trace_max_len: 8  # 工具调用历史条数（默认 8）
+  trace_observation_max_chars: 1000  # 每条工具调用结果的最大字符数（默认 1000）
+  tools:
+    - python_interpreter_tool
+
+browser_use_agent_config:
+  type: browser_use_agent
+  name: browser_use_agent
+  model_id: qwen3-8b
+  description: "A browser use agent that can research relevant web pages and interact with them."
+  max_steps: 5
+  provide_run_summary: true
+  trace_max_len: 8  # 工具调用历史条数（默认 8）
+  trace_observation_max_chars: 1000  # 每条工具调用结果的最大字符数（默认 1000）
+  tools:
+    - auto_browser_use_tool
+    - python_interpreter_tool
+
