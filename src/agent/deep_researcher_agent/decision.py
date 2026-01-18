@@ -5,21 +5,19 @@ from typing import Any, Sequence
 from src.agent.common import DecisionSchemaTool
 
 
+from src.registry import TOOL  # Fix import
+
+@TOOL.register_module(name="deep_researcher_decision", force=True)
 def make_deep_researcher_decision_tool(*, tool_names: Sequence[str]) -> DecisionSchemaTool:
     """
     深度研究代理的专用决策模式。
 
     这将 LLM 的动作空间限制为：
     - route: call_tool | call_llm_node | finish
-    - tool_name: 配置的工具名称之一
-    - llm_node: 此代理的内部节点之一
+    - tool_name: 配置的工具名称之一 (现在包含 smart_search_tool, insight_reflector_tool)
+    - llm_node: 此代理的内部节点只有 "summarize"
     """
     node_names = [
-        "optimize_query",
-        "search_web",
-        "extract_insights",
-        "generate_followups",
-        "select_followup",
         "summarize",
     ]
     tool_names_list = [t for t in tool_names if t]
