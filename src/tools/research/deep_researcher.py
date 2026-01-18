@@ -67,15 +67,7 @@ class ResearchInsight(BaseModel):
         source = self.source_title or self.source_url
         return f"{self.content} [Source: {source}]"
 
-class ResearchContext(BaseModel):
-    """用于跟踪研究进度的研究上下文。"""
-    query: str = Field(description="原始研究查询")
-    insights: List[ResearchInsight] = Field(default_factory=list, description="发现的关键见解")
-    follow_up_queries: List[str] = Field(default_factory=list, description="生成的后续查询")
-    visited_urls: Set[str] = Field(default_factory=set, description="研究期间访问的 URL")
-    current_depth: int = Field(default=0, description="当前研究探索深度", ge=0)
-    max_depth: int = Field(default=2, description="要达到的最大研究深度", ge=1)
-
+# 结构化输出工具定义（用于 LLM 工具调用）
 class ResearchSummary(BaseModel):
     """深度研究结果的综合摘要。"""
 

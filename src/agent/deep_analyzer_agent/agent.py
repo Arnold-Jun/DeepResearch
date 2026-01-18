@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import json5
-
 from langgraph.graph import END, StateGraph
 
 from src.models.base import Model

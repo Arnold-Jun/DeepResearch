@@ -5,9 +5,6 @@ from typing import Any, Sequence
 from src.agent.common import DecisionSchemaTool
 
 
-from src.registry import TOOL  # Fix import
-
-@TOOL.register_module(name="deep_researcher_decision", force=True)
 def make_deep_researcher_decision_tool(*, tool_names: Sequence[str]) -> DecisionSchemaTool:
     """
     深度研究代理的专用决策模式。

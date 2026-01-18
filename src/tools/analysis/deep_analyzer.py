@@ -27,19 +27,6 @@ DEEP_ANALYZER_SUMMARY_DESCRIPTION = """请对不同模型的输出进行逐步�
 分析：
 {analysis}"""
 
-# 数据模型
-class AnalysisResult(BaseModel):
-    """单个模型的分析结果"""
-    model_name: str = Field(description="模型名称")
-    analysis: str = Field(description="分析结果")
-
-
-class AnalysisSummary(BaseModel):
-    """分析摘要"""
-    summary: str = Field(description="综合摘要")
-    model_analyses: Dict[str, str] = Field(description="各模型的分析结果")
-
-
 # 结构化输出工具定义（用于 LLM 工具调用）
 class AnalyzeTool(AsyncTool):
     """用于执行单个分析的工具（结构化输出定义）"""
