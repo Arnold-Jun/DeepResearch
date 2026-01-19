@@ -38,9 +38,12 @@ class DeepAnalyzerGraphAgent(BaseGraphAgent):
     
     架构变更：
     - 旧架构：Reason -> AnalyzeNode / ParallelAnalyzeNode / SummarizeNode
-    - 新架构：Reason <-> ToolExecutor (SmartAnalyzeTool | SummarizeAnalysisTool)
+    - 最终架构：Reason <-> ToolExecutor (SmartAnalyzeTool) -> SummarizeNode
     
-    完全工具化，图结构简化为单一推理执行循环。
+    优势：
+    - 总结节点增加了流程确定性（大门在身后锁死）
+    - 节省了最后一次 LLM 推理（无需再次决策退出）
+    - 维持了与 DeepResearcherAgent 的架构对称性
     """
 
     def __init__(
@@ -70,17 +73,15 @@ class DeepAnalyzerGraphAgent(BaseGraphAgent):
             analyzer_model_ids=analyzer_model_ids
         ))
         
-        # 2. 注册 summarize tool
-        _ensure_tool(tools_dict, "summarize_analysis_tool", lambda: SummarizeAnalysisTool(
+        # 2. 这里的总结工具不再作为普通工具放入 tools_dict，
+        # 而是作为类属性，供专门的 summarize 节点调用。
+        self._summary_tool = SummarizeAnalysisTool(
             summarizer_model_id=self.summarizer_model_id
-        ))
+        )
 
         # Reducers
         def reduce_smart_analyze(state: dict[str, Any], result: Any) -> None:
             output = result if isinstance(result, dict) else (getattr(result, "output", {}) or {})
-            
-            # SmartAnalyzeTool (via ParallelAnalyze) returns a dict of model_id -> analysis
-            # or a single string/dict if single model.
             
             if isinstance(output, dict):
                  state["analysis_results"] = output
@@ -100,20 +101,12 @@ class DeepAnalyzerGraphAgent(BaseGraphAgent):
                 "models_used": list(state["analysis_results"].keys())
             }
 
-        def reduce_summarize(state: dict[str, Any], result: Any) -> None:
-            summary = getattr(result, "output", "") or str(result)
-            state["summary"] = summary
-            state["final_answer"] = summary
-            state["is_final"] = True  # Termination trigger
-            state["observation"] = f"Summarization complete. Final answer generated."
-
         def reduce_any(state: dict[str, Any], result: Any) -> None:
             obs = str(getattr(result, "output", result))[:800]
             state["observation"] = obs
 
         reducers = {
             "smart_analyze_tool": reduce_smart_analyze,
-            "summarize_analysis_tool": reduce_summarize,
         }
         for name in tools_dict:
             if name not in reducers:
@@ -121,22 +114,23 @@ class DeepAnalyzerGraphAgent(BaseGraphAgent):
 
         self._tool_executor = ToolExecutorNode(tools=tools_dict, reducers=reducers, default_timeout_s=180)
 
+        # LLM 推理节点
         tool_names = list(self._tool_executor.tools.keys())
         decision_tool = make_deep_analyzer_decision_tool(tool_names=tool_names)
         
         system_prompt = (
             "你是深度分析控制器（重构版）。决定下一步操作。\n"
             "工作流指导：\n"
-            "1. 必须首先调用 'smart_analyze_tool' 对输入内容进行深入分析。\n"
-            "2. 分析完成后，必须调用 'summarize_analysis_tool' 来汇总结果并生成最终报告。\n"
-            "3. 只有在完成总结后，任务才算结束。\n"
+            "1. 首先调用 'smart_analyze_tool' 对输入内容进行深入分析。\n"
+            "2. 分析完成后，路由到 'summarize' 节点来汇总结果并生成最终报告。\n"
+            "3. 只有在完成总结后，任务才算正式结束。\n"
         )
         
         self._reason_node = LLMReasoningNode(
             model=self.model,
             system_prompt=system_prompt,
             decision_tool=decision_tool,
-            tool_catalog_text=_tool_catalog_text(tools_dict),
+            tool_catalog_text=_tool_catalog_text(tools_dict) + "\n\nAvailable nodes:\n- summarize",
         )
 
         super().__init__(
@@ -150,7 +144,7 @@ class DeepAnalyzerGraphAgent(BaseGraphAgent):
         state = super()._initial_state(task)
         state.update({
             "task": task,
-            "source": None, # Should be injected by caller or extracted from task
+            "source": None,
             "analysis_results": {},
             "summary": None,
             "analyzed_once": False,
@@ -174,41 +168,58 @@ class DeepAnalyzerGraphAgent(BaseGraphAgent):
             state["final_answer"] = decision.get("final_answer") or state.get("summary") or "Done."
             return "end"
 
-        if route == "call_tool":
+        if route in ("call_tool", "call_tools_parallel"):
+            if route == "call_tools_parallel":
+                # 由于分析代理通常单步，暂不复杂化 parallel 逻辑，映射到 tool_executor 即可
+                return "tool_executor"
+                
             tool_name = decision.get("tool_name")
-            
-            # Intelligent Routing Safeguard
             if not tool_name:
                 if not state.get("analyzed_once"):
                     tool_name = "smart_analyze_tool"
-                elif not state.get("summary"):
-                    tool_name = "summarize_analysis_tool"
             
             if tool_name:
-                # Supply args if missing
                 if not decision.get("tool_args"):
-                    # For synthesize args, we often need 'source' from state.
-                    # Ideally, source is passed in initial state.
-                    # Or 'analysis_results' for summarizer.
                     if tool_name == "smart_analyze_tool":
                          state["decision"]["tool_args"] = {
                              "task": state.get("task"),
-                             "source": state.get("source") or state.get("task", "") # Fallback
+                             "source": state.get("source") or state.get("task", "")
                          }
-                    elif tool_name == "summarize_analysis_tool":
-                        state["decision"]["tool_args"] = {
-                            "model_analyses": state.get("analysis_results", {})
-                        }
                 return "tool_executor"
 
-        state["is_final"] = True
-        state["final_answer"] = "Failed: Invalid route or no tool selected."
+        if route == "call_llm_node":
+            node = decision.get("llm_node")
+            if node == "summarize":
+                return "summarize"
+
+        # 默认：如果已分析但由于某种原因没路由，自动汇总
+        if state.get("analyzed_once") and not state.get("summary"):
+            return "summarize"
+            
         return "end"
+
+    async def _summarize_node(self, state: dict[str, Any]) -> dict[str, Any]:
+        # 调用专门的总结工具
+        res = await self._summary_tool.forward(
+            model_analyses=state.get("analysis_results", {})
+        )
+        if res.error:
+            state["error"] = res.error
+            state["final_answer"] = f"Summarization failed: {res.error}"
+        else:
+            summary = res.output or str(res)
+            state["summary"] = summary
+            state["final_answer"] = summary
+            state["observation"] = "Summarization complete."
+            
+        state["is_final"] = True
+        return state
 
     def _build_graph(self):
         workflow = StateGraph(dict)
         workflow.add_node("reason", self._reason_node)
         workflow.add_node("tool_executor", self._tool_executor)
+        workflow.add_node("summarize", self._summarize_node)
 
         workflow.set_entry_point("reason")
         
@@ -217,11 +228,13 @@ class DeepAnalyzerGraphAgent(BaseGraphAgent):
             self._route_from_decision,
             {
                 "tool_executor": "tool_executor",
+                "summarize": "summarize",
                 "end": END,
             },
         )
 
         workflow.add_edge("tool_executor", "reason")
+        workflow.add_edge("summarize", END)
 
         return workflow.compile()
 
